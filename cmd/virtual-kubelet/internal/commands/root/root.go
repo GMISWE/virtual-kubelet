@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -31,6 +32,7 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
 	"github.com/virtual-kubelet/virtual-kubelet/node/nodeutil"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apiserver/pkg/server/dynamiccertificates"
 )
 
@@ -114,7 +116,8 @@ func runRootCommand(ctx context.Context, s *provider.Store, c Opts) error {
 		return err
 	}
 
-	cm, err := nodeutil.NewNode(c.NodeName, newProvider, func(cfg *nodeutil.NodeConfig) error {
+	// 构建节点选项列表
+	nodeConfigOpt := func(cfg *nodeutil.NodeConfig) error {
 		cfg.KubeconfigPath = c.KubeConfigPath
 		cfg.Handler = mux
 		cfg.InformerResyncPeriod = c.InformerResyncPeriod
@@ -133,15 +136,24 @@ func runRootCommand(ctx context.Context, s *provider.Store, c Opts) error {
 		cfg.NumWorkers = c.PodSyncWorkers
 
 		return nil
-	},
+	}
+
+	nodeOpts := []nodeutil.NodeOpt{
+		nodeConfigOpt,
 		nodeutil.WithClient(clientSet),
 		setAuth(c.NodeName, apiConfig),
-		nodeutil.WithTLSConfig(
+		nodeutil.AttachProviderRoutes(mux),
+	}
+
+	// 只在提供了证书时才配置 TLS
+	if apiConfig.CertPath != "" || apiConfig.KeyPath != "" {
+		nodeOpts = append(nodeOpts, nodeutil.WithTLSConfig(
 			nodeutil.WithKeyPairFromPath(apiConfig.CertPath, apiConfig.KeyPath),
 			maybeCA(apiConfig.CACertPath),
-		),
-		nodeutil.AttachProviderRoutes(mux),
-	)
+		))
+	}
+
+	cm, err := nodeutil.NewNode(c.NodeName, newProvider, nodeOpts...)
 	if err != nil {
 		return err
 	}
@@ -163,6 +175,17 @@ func runRootCommand(ctx context.Context, s *provider.Store, c Opts) error {
 		log.G(ctx).Debug("Waiting for controllers to be done")
 		cancel()
 		<-cm.Done()
+
+		// 优雅关闭：删除虚拟节点
+		log.G(ctx).Info("Cleaning up: deleting virtual node")
+		deleteCtx, deleteCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer deleteCancel()
+
+		if err := clientSet.CoreV1().Nodes().Delete(deleteCtx, c.NodeName, metav1.DeleteOptions{}); err != nil {
+			log.G(ctx).WithError(err).Warn("Failed to delete node during shutdown")
+		} else {
+			log.G(ctx).Info("Virtual node deleted successfully")
+		}
 	}()
 
 	log.G(ctx).Info("Waiting for controller to be ready")

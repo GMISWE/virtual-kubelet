@@ -43,6 +43,10 @@ func WithCAFromPath(p string) func(*tls.Config) error {
 // WithKeyPairFromPath make sa TLS config option which loads the key pair paths from disk and appends them to the tls config.
 func WithKeyPairFromPath(cert, key string) func(*tls.Config) error {
 	return func(cfg *tls.Config) error {
+		// 如果证书路径为空，跳过加载
+		if cert == "" && key == "" {
+			return nil
+		}
 		cert, err := tls.LoadX509KeyPair(cert, key)
 		if err != nil {
 			return err

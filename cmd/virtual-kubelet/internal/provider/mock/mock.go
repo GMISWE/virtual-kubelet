@@ -100,6 +100,16 @@ func NewMockProvider(providerConfig, nodeName, operatingSystem string, internalI
 
 // loadConfig loads the given json configuration files.
 func loadConfig(providerConfig, nodeName string) (config MockConfig, err error) {
+	// 如果没有提供配置文件，使用默认配置
+	if providerConfig == "" {
+		config = MockConfig{
+			CPU:    defaultCPUCapacity,
+			Memory: defaultMemoryCapacity,
+			Pods:   defaultPodCapacity,
+		}
+		return config, nil
+	}
+
 	data, err := os.ReadFile(providerConfig)
 	if err != nil {
 		return config, err
