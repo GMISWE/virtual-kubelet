@@ -343,10 +343,6 @@ func (pc *PodController) Run(ctx context.Context, podSyncWorkers int) (retErr er
 			oldPod := oldObj.(*corev1.Pod)
 			newPod := newObj.(*corev1.Pod)
 
-			// Debug log for pod updates
-			log.G(ctx).Infof("[DEBUG] UpdateFunc triggered for pod %s/%s, DeletionTimestamp: old=%v new=%v",
-				newPod.Namespace, newPod.Name, oldPod.DeletionTimestamp, newPod.DeletionTimestamp)
-
 			// At this point we know that something in .metadata or .spec has changed, so we must proceed to sync the pod.
 			if key, err := cache.MetaNamespaceKeyFunc(newPod); err != nil {
 				log.G(ctx).Error(err)
@@ -386,11 +382,6 @@ func (pc *PodController) Run(ctx context.Context, podSyncWorkers int) (retErr er
 			defer cancel()
 			ctx, span := trace.StartSpan(ctx, "DeleteFunc")
 			defer span.End()
-
-			// Debug log for pod deletion
-			if p, ok := pod.(*corev1.Pod); ok {
-				log.G(ctx).Infof("[DEBUG] DeleteFunc triggered for pod %s/%s", p.Namespace, p.Name)
-			}
 
 			if key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(pod); err != nil {
 				log.G(ctx).Error(err)
@@ -612,7 +603,7 @@ func (pc *PodController) syncPodInProvider(ctx context.Context, pod *corev1.Pod,
 	// Check whether the pod has been marked for deletion.
 	// If it does, guarantee it is deleted in the provider and Kubernetes.
 	if pod.DeletionTimestamp != nil {
-		log.G(ctx).Infof("[DEBUG] syncPodInProvider: pod %s/%s has DeletionTimestamp, calling DeletePod", pod.Namespace, pod.Name)
+		log.G(ctx).Infof("syncPodInProvider: pod %s/%s has DeletionTimestamp, calling DeletePod", pod.Namespace, pod.Name)
 		if err := pc.deletePod(ctx, pod); errdefs.IsNotFound(err) {
 			log.G(ctx).Debug("Pod not found in provider")
 		} else if err != nil {
