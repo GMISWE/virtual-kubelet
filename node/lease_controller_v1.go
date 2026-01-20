@@ -242,17 +242,20 @@ func (c *leaseController) retryUpdateLease(ctx context.Context, node *corev1.Nod
 			c.latestLease = lease
 			return nil
 		}
-		log.G(ctx).WithError(err).Error("failed to update node lease")
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			log.G(ctx).WithError(err).Error("failed to update node lease")
 			err = fmt.Errorf("failed after %d attempts to update node lease: %w", maxUpdateRetries, err)
 			span.SetStatus(err)
 			return err
 		}
 		// OptimisticLockError requires getting the newer version of lease to proceed.
 		if apierrors.IsConflict(err) {
+			log.G(ctx).WithError(err).Debug("lease version conflict, retrying")
 			base, _ = c.backoffEnsureLease(ctx, node)
 			continue
 		}
+		// Other unexpected errors
+		log.G(ctx).WithError(err).Error("failed to update node lease")
 	}
 
 	err := fmt.Errorf("failed after %d attempts to update node lease", maxUpdateRetries)
