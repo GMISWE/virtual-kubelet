@@ -407,8 +407,39 @@ func (pc *PodController) deletePodsFromKubernetesHandler(ctx context.Context, ke
 		log.G(ctx).WithField("k8sPodUID", k8sPod.UID).WithField("uid", uid).Warn("Not deleting pod because remote pod has different UID")
 		return nil
 	}
-	if running(&k8sPod.Status) {
-		log.G(ctx).Error("Force deleting pod in running state")
+
+	// Check if pod is actually running by consulting provider's reported status (more accurate than K8s status)
+	// K8s status may be stale due to async status sync
+	k8sStatusRunning := running(&k8sPod.Status)
+	providerStatusRunning := false
+	providerStatusAvailable := false
+
+	if obj, ok := pc.knownPods.Load(metaKey); ok {
+		kPod := obj.(*knownPod)
+		kPod.Lock()
+		providerPod := kPod.lastPodStatusReceivedFromProvider
+		if providerPod != nil {
+			providerStatusAvailable = true
+			providerStatusRunning = running(&providerPod.Status)
+		}
+		kPod.Unlock()
+	}
+
+	// Log based on actual status from provider vs K8s status
+	if providerStatusAvailable {
+		if providerStatusRunning {
+			// Provider says pod is still running - this is a real force delete
+			log.G(ctx).Warn("Force deleting pod in running state (provider confirms pod is running)")
+		} else if k8sStatusRunning {
+			// Provider says pod is stopped, but K8s status hasn't synced yet - this is normal
+			log.G(ctx).Info("Deleting pod (K8s status shows running but provider reports stopped, status sync pending)")
+		}
+		// else: both agree pod is not running, no special logging needed
+	} else {
+		// Provider status not available (pod may have been deleted from knownPods already)
+		if k8sStatusRunning {
+			log.G(ctx).Warn("Force deleting pod in running state (provider status unavailable)")
+		}
 	}
 
 	// We don't check with the provider before doing this delete. At this point, even if an outstanding pod status update
